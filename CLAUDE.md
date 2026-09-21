@@ -42,6 +42,10 @@ Do not add `ports:` to debug — use the `exec` line above.
 
 Commits follow Conventional Commits — see `.github/prompt/copilot-commit-message-instructions.md`.
 
+CI (`.github/workflows/ci.yml`) runs `uv lock --check`, ruff and the suite on
+`main`/`dev` pushes and every PR. It proves nothing about the Orin: the
+onnxruntime pin answers to hardware the runner does not have.
+
 ## What this service is
 
 Speech synthesis and speaker playback for the SyncAI robot, split out of

@@ -49,6 +49,40 @@ docker compose exec tts python -c \
   "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').read().decode())"
 ```
 
+### Starting at boot
+
+`restart: unless-stopped` is already in `docker-compose.yml`, and on its own it
+is usually enough: the Docker daemon restores containers with a restart policy
+when it starts, so a reboot brings the service back. Two things it does not
+cover:
+
+- `docker compose down` removes the container, and a removed container has no
+  restart policy left to honour.
+- a manual `docker stop` stays stopped across reboots — that is what
+  `unless-stopped` means.
+
+Check the daemon itself is enabled first, since everything above depends on it:
+
+```bash
+systemctl is-enabled docker     # want: enabled
+```
+
+For a robot, `deploy/syncai-tts.service` closes the two gaps: it runs
+`docker compose up -d` at boot, so the service returns even after a `down`, and
+re-reads the compose file each time. Edit `User=` and `WorkingDirectory=` for
+the checkout, then:
+
+```bash
+sudo cp deploy/syncai-tts.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now syncai-tts
+```
+
+Keep `restart: unless-stopped` either way — systemd starts the service at boot,
+the restart policy is what recovers it from a crash in between.
+
+### Device wiring
+
 The device wiring is the other fiddly part, and it is all in
 `docker-compose.yml`: `/dev/snd` as a device, `/dev/syncai` read-only for the
 udev symlink, `./models/kokoro` mounted read-only at `/models/kokoro`, and
@@ -185,6 +219,11 @@ is the annotated list; the ones worth knowing:
 
 ## Tests
 
+CI runs the two commands below on every push to `main`/`dev` and on every pull
+request (`.github/workflows/ci.yml`), plus `uv lock --check`. It needs no
+hardware — but it cannot speak for the Orin either; a dependency bump that goes
+green here still has to pass the on-device check in `CLAUDE.md`.
+
 ```bash
 uv run pytest test/ -q
 uv run pytest test/test_player.py::test_name -q   # one test
@@ -218,6 +257,7 @@ bind mount does not hide it.
 ```
 pyproject.toml     dependencies, uv config, ruff/pytest settings
 uv.lock            the committed resolution; the image installs from it
+deploy/            systemd unit for starting the stack at boot
 models/kokoro/     the weights: gitignored, mounted into the container
 syncai_tts/
   main.py          entrypoint: load .env, build settings/engine/player, serve

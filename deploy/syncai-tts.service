@@ -1,0 +1,55 @@
+# Bring syncai_tts up at boot, via compose.
+#
+# `restart: unless-stopped` in docker-compose.yml already survives a reboot on
+# its own: the Docker daemon restores containers with a restart policy when it
+# starts. This unit exists for the two cases it does not cover —
+#
+#   * `docker compose down` removes the container, and a removed container has
+#     no restart policy left to honour. Nothing brings it back at the next boot.
+#   * a manual `docker stop` marks it stopped, and `unless-stopped` means what
+#     it says: it stays stopped across reboots.
+#
+# It also re-reads docker-compose.yml on every boot, so an edit lands without
+# anyone remembering to re-run `up`.
+#
+# Keep `restart: unless-stopped` in the compose file regardless. That is what
+# handles a crash *between* boots — including the onnxruntime abort documented
+# in pyproject.toml, which kills the process outright.
+#
+# Install on the robot:
+#   sudo cp deploy/syncai-tts.service /etc/systemd/system/
+#   sudoedit /etc/systemd/system/syncai-tts.service   # set User= and WorkingDirectory=
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now syncai-tts
+#   systemctl status syncai-tts
+
+[Unit]
+Description=SyncAI TTS service
+Documentation=https://github.com/chungweeeei/SyncAI-TTS
+# Requires, not Wants: without the daemon the ExecStart below is a no-op that
+# would still be reported as a successful start.
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# oneshot + RemainAfterExit: `compose up -d` returns immediately, and the unit
+# should read as active afterwards rather than as "exited, therefore failed".
+# The containers' own lifetimes are Docker's business, not systemd's.
+Type=oneshot
+RemainAfterExit=yes
+
+# EDIT THESE TWO for the robot. WorkingDirectory must be the repo checkout:
+# the compose file mounts ./models/kokoro relative to it.
+User=syncai
+WorkingDirectory=/home/syncai/SyncAI-TTS
+
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+
+# Pulling or building an image on a cold boot can take minutes; systemd should
+# wait rather than kill it half way.
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

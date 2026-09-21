@@ -1,0 +1,57 @@
+# Lint and test on every push and pull request.
+#
+# Deliberately small, and it can afford to be: the suite fakes the kokoro
+# session and patches the aplay subprocess, so none of it needs ROS,
+# onnxruntime, a 310 MB model file or a sound card. A GitHub runner is enough,
+# and that is a property worth protecting — the code this service replaced could
+# only be exercised inside the robot container.
+#
+# What this does NOT cover: the Orin itself. The onnxruntime pin exists because
+# of hardware this runner does not have; see "Verifying the onnxruntime pin on
+# the Orin" in CLAUDE.md before trusting a green tick on a dependency bump.
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+# A new push to the same branch makes the previous run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same uv the Dockerfile pins, so a resolution that passes here is the
+      # one the image installs.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.8"
+          enable-cache: true
+
+      # .python-version pins 3.10, the container's interpreter.
+      - name: Install Python
+        run: uv python install
+
+      # --frozen: fail rather than silently re-resolving. A lock that no longer
+      # matches pyproject.toml is a review comment, not something CI papers over.
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Check the lock is current
+        run: uv lock --check
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest test/ -q
