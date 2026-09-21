@@ -97,12 +97,13 @@ link falls back to the by-name dongle rather than raising.
 - **`/health` always returns 200**; degradation lives in the body (`model`,
   `speaker.thread_alive`). A failing healthcheck would restart-loop the container
   exactly when an operator wants to read the reason.
-- **`onnxruntime==1.18.1` and `numpy<2` are not negotiable.** ≥1.19's CPU-topology
-  probe corrupts the heap on the Jetson Orin when `nvpmodel` offlines cores.
-  `kokoro-onnx`'s metadata disagrees (it wants `onnxruntime>=1.20.1`, `numpy>=2`);
-  `[tool.uv] override-dependencies` overrules it, so its real deps are resolved
-  and locked rather than hand-listed beside a `--no-deps` install. Changing
-  either pin means re-reading that comment in `pyproject.toml` first.
+- **`onnxruntime` is pinned exactly, and the pin is a hardware decision.** It sat
+  at 1.18.1 for two years because ≥1.19's CPU-topology probe corrupts the heap on
+  the Jetson Orin when `nvpmodel` offlines cores. It is now `==1.23.2` — the last
+  release with a cp310 aarch64 wheel (1.24.4 requires ≥3.11, so going further
+  moves the container's interpreter too). **This is validated off-device only**;
+  see "Verifying the onnxruntime pin on the Orin" below before trusting it in
+  production. Re-read the comment in `pyproject.toml` before touching the pin.
 - **No ROS, no database, no Temporal client in this process.** Keeping the
   dependency set small is half the reason the split happened.
 - `ruff.toml` pins `select = ["E4", "E7", "E9", "F"]` explicitly and deliberately
@@ -117,3 +118,26 @@ replaced could only run inside the robot container, and so the one thing it
 owned — who may touch the speaker — was barely covered. `FakeAplay.max_inside`
 is how concurrency on the device is asserted; `FakeAplay.gate` holds the player
 inside the spawn window a cancel can land in.
+
+## Verifying the onnxruntime pin on the Orin
+
+The heap corruption that froze the pin at 1.18.1 only reproduces on the device,
+with cores offline — no amount of laptop or CI testing settles it. On a JetPack
+6.2 Orin:
+
+```bash
+nvpmodel -q                       # confirm the mode that offlines cores (MODE_30W: 8-11)
+nproc                             # fewer than the full core count = the failing condition
+docker compose up -d --build
+for i in $(seq 20); do            # the crash is a malloc assertion at session construction,
+  docker compose restart tts      # and it is intermittent — one clean start proves nothing
+  sleep 15
+  docker compose exec -T tts python -c \
+    "import urllib.request,json; print(json.load(urllib.request.urlopen('http://127.0.0.1:8080/health'))['model'])"
+done
+```
+
+`model: ready` on every iteration, and no `malloc.c` assertion or exit 134 in
+`docker compose logs tts`, is the evidence. Anything else: revert the pin to
+`1.18.1` (and `numpy<2`, plus the `[tool.uv] override-dependencies` block that
+went with it — see git history for the exact stanza).

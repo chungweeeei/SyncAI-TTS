@@ -66,8 +66,8 @@ uv run syncai-tts
 ```
 
 `uv sync` is the whole setup. `.python-version` pins 3.10, the same interpreter
-the container runs, which is what makes `onnxruntime==1.18.1` installable on a
-laptop at all — it publishes no wheels for 3.13+.
+the container runs — which is also what caps `onnxruntime` at 1.23.x, the last
+line with cp310 wheels.
 
 Dependencies live in `pyproject.toml` and resolve into `uv.lock`, which is
 committed and is what the image installs:
@@ -78,11 +78,11 @@ uv lock --upgrade-package <pkg> # re-resolve one package
 uv sync --no-dev                # what the runtime image installs
 ```
 
-`kokoro-onnx`'s metadata demands `onnxruntime>=1.20.1` and `numpy>=2`, both
-wrong for the Orin. `[tool.uv] override-dependencies` in `pyproject.toml`
-overrules that metadata, which is why its real dependencies (`colorlog`,
-`espeakng-loader`, `phonemizer-fork`) are resolved and locked instead of being
-hand-listed next to a `pip install --no-deps`.
+`onnxruntime` is pinned exactly (`==1.23.2`) and the reason is the Orin, not
+taste: ≥1.19 once corrupted the heap there when `nvpmodel` offlined cores, which
+is why the pin sat at 1.18.1 for two years. Read the comment in
+`pyproject.toml`, and `CLAUDE.md`'s "Verifying the onnxruntime pin on the Orin",
+before changing it.
 
 ## API
 
