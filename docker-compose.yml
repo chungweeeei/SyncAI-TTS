@@ -11,9 +11,6 @@ services:
     container_name: syncai_tts
     restart: unless-stopped
 
-    ports:
-      - "8080:8080"
-
     # /dev/snd is the sound card. /dev/syncai carries the udev symlink
     # (speaker_pcm -> ../snd/pcmC<card>D<dev>p) that syncai_sys_manager's
     # 99-syncai-devices.rules maintains; the service reads it per utterance so a

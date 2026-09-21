@@ -222,11 +222,12 @@ class SpeechPlayer:
                     "new utterances.",
                     code=Failure.QUEUE_FULL,
                 )
-            if len(self._pending) >= self._settings.max_queue:
+            waiting = len(self._pending)
+            if waiting >= self._settings.max_queue:
                 raise ConflictError(
-                    f"{len(self._pending)} utterances are already waiting "
-                    f"(TTS_MAX_QUEUE={self._settings.max_queue}). Wait for the "
-                    "queue to drain, or cancel one.",
+                    f"{waiting} {'utterance is' if waiting == 1 else 'utterances are'} "
+                    f"already waiting (TTS_MAX_QUEUE={self._settings.max_queue}). "
+                    "Wait for the queue to drain, or cancel one.",
                     code=Failure.QUEUE_FULL,
                 )
 
