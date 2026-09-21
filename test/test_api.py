@@ -63,15 +63,47 @@ def test_synthesize_rejects_an_unknown_voice_with_a_code(client):
     assert "nope" in body["detail"]
 
 
-def test_text_is_capped_and_speed_is_bounded(client):
-    too_long = client.post("/api/v1/synthesize", json={"text": "x" * 1001})
-    assert too_long.status_code == 422
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"text": "x" * 1001},
+        {"text": ""},
+        {"text": "hi", "speed": 3.0},
+        {"text": "hi", "speed": 0.1},
+    ],
+)
+@pytest.mark.parametrize("path", ["/api/v1/synthesize", "/api/v1/speak"])
+def test_text_is_capped_and_speed_is_bounded(client, path, body):
+    response = client.post(path, json=body)
+    assert response.status_code == 422
 
-    empty = client.post("/api/v1/synthesize", json={"text": ""})
-    assert empty.status_code == 422
 
-    too_fast = client.post("/api/v1/synthesize", json={"text": "hi", "speed": 3.0})
-    assert too_fast.status_code == 422
+@pytest.mark.parametrize("path", ["/api/v1/synthesize", "/api/v1/speak"])
+def test_a_rejected_body_keeps_the_error_contract(client, path):
+    """pydantic's rejections answer `{detail, code}` like every other error.
+
+    FastAPI's default is a list of dicts under `detail` and no `code` at all, so
+    a caller that reads `body["code"]` — which is what this service's contract
+    tells it to do, and what syncai_backend's gateway does — breaks on the most
+    reachable input error there is: text past the 1000-char cap.
+    """
+    response = client.post(path, json={"text": "x" * 1001})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "invalid_request"
+    assert isinstance(body["detail"], str)
+    # The field is named, and the framework's "body" prefix is not.
+    assert body["detail"].startswith("text: ")
+
+
+def test_a_rejected_body_reports_every_bad_field(client):
+    body = client.post(
+        "/api/v1/speak", json={"text": "", "speed": 99.0}
+    ).json()
+
+    assert body["code"] == "invalid_request"
+    assert "and 1 more" in body["detail"]
 
 
 def test_the_default_voice_is_used_when_none_is_given(client, kokoro):

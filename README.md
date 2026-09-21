@@ -147,6 +147,7 @@ Every error is `{"detail": "<prose>", "code": "<stable string>"}` — the shape
 | code | status | meaning |
 |---|---|---|
 | `unknown_voice` | 400 | the caller's mistake; do not retry |
+| `invalid_request` | 422 | body failed validation: text empty or over 1000 chars, speed outside 0.5–2.0 |
 | `model_unavailable` | 503 | weights missing, or the session would not build |
 | `synthesis_failed` | 500 | kokoro raised on this text |
 | `queue_full` | 409 | more than `TTS_MAX_QUEUE` already waiting |
@@ -156,6 +157,10 @@ Every error is `{"detail": "<prose>", "code": "<stable string>"}` — the shape
 | `playback_timeout` | — | on a job: the device is wedged |
 
 The last three are recorded on a failed job; by then the request is answered.
+
+`invalid_request` is the one FastAPI would otherwise answer in its own shape (a
+list under `detail`, no `code`). A handler in `api/app.py` normalises it, so
+`code` is readable on every error this service returns without exception.
 
 `unknown_voice` is load-bearing across both repos — the backend answers 400 on
 it and its SPEAK activity marks the attempt non-retryable. The string is shared

@@ -45,6 +45,12 @@ class Failure(str, Enum):
     # No job with that id: never existed, or aged out of the history window.
     JOB_NOT_FOUND = "job_not_found"
 
+    # The request body did not validate: text empty or past the 1000-char cap,
+    # speed outside 0.5-2.0. Caught by pydantic before a handler runs, so it
+    # needs its own code — see the RequestValidationError handler in api/app.py
+    # for why the framework's default body is not good enough here.
+    INVALID_REQUEST = "invalid_request"
+
 
 class TtsError(Exception):
     """Base for everything the API answers with a structured body.

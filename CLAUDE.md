@@ -12,7 +12,7 @@ is no `requirements.txt`; do not reintroduce one.
 
 ```bash
 uv sync                                         # create/update .venv from the lock
-uv run pytest test/ -q                          # full suite (~3 s, 67 tests)
+uv run pytest test/ -q                          # full suite (~3 s, 77 tests)
 uv run pytest test/test_player.py::test_name -q # one test
 uv run ruff check .                             # lint
 uv run syncai-tts                               # run the service
@@ -77,7 +77,11 @@ poller never races its own job out of existence.
 
 **The error contract is shared with `syncai_backend`.** Every error body is
 `{"detail": "<prose>", "code": "<stable string>"}` and callers branch on `code`,
-never the sentence. `Failure.UNKNOWN_VOICE` (`"unknown_voice"`) is load-bearing
+never the sentence. That holds for pydantic's rejections too, but only because
+`api/app.py` installs a `RequestValidationError` handler — FastAPI's default
+body has no `code` and a list under `detail`. Any new handler that can answer
+an error must go through `TtsError` or that handler; nothing else may invent a
+body shape. `Failure.UNKNOWN_VOICE` (`"unknown_voice"`) is load-bearing
 across both repos — the backend's REST layer answers 400 on it and its SPEAK
 activity marks the attempt non-retryable. Do not rename these strings.
 

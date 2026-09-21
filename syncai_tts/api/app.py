@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -17,7 +18,7 @@ from syncai_tts import __version__
 from syncai_tts.api.routes import init_routes
 from syncai_tts.config import Settings
 from syncai_tts.engine import STATE_READY, KokoroEngine
-from syncai_tts.errors import TtsError
+from syncai_tts.errors import Failure, TtsError
 from syncai_tts.player import SpeechPlayer
 
 
@@ -36,6 +37,37 @@ def register_exception_handlers(app: FastAPI) -> None:
         if exc.code is not None:
             content["code"] = exc.code.value
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        """Put pydantic's rejections into the same shape as everything else.
+
+        FastAPI's default answers ``{"detail": [{"type": ..., "loc": [...],
+        "msg": ..., "input": ...}, ...]}`` — no ``code``, and ``detail`` is a
+        list rather than a sentence. A caller written against this service's
+        contract reads ``body["code"]`` and renders ``body["detail"]``, so the
+        default body breaks it on the most reachable input error there is: text
+        past the 1000-char cap, straight from the console's text box.
+
+        The first error is the whole message. There is one field in flight per
+        request in practice, and a caller that wants the full list can read the
+        400-level response of a schema it already knows.
+        """
+        errors = exc.errors()
+        first = errors[0] if errors else {}
+        # Drop the leading "body" segment: "body.text" says nothing "text" does
+        # not, and the caller did not choose where its JSON went.
+        location = ".".join(
+            str(part) for part in first.get("loc", ()) if part not in ("body", "query")
+        )
+        message = first.get("msg", "request body did not validate")
+        detail = f"{location}: {message}" if location else message
+        if len(errors) > 1:
+            detail += f" (and {len(errors) - 1} more)"
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail, "code": Failure.INVALID_REQUEST.value},
+        )
 
 
 def create_app(
