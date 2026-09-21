@@ -78,11 +78,11 @@ uv lock --upgrade-package <pkg> # re-resolve one package
 uv sync --no-dev                # what the runtime image installs
 ```
 
-`onnxruntime` is pinned exactly (`==1.23.2`) and the reason is the Orin, not
-taste: ≥1.19 once corrupted the heap there when `nvpmodel` offlined cores, which
-is why the pin sat at 1.18.1 for two years. Read the comment in
-`pyproject.toml`, and `CLAUDE.md`'s "Verifying the onnxruntime pin on the Orin",
-before changing it.
+`onnxruntime` is pinned exactly (`==1.18.1`) and the reason is the Orin, not
+taste: ≥1.19 aborts there when `nvpmodel` keeps cores offline. 1.23.2 was
+retested on a JetPack 6.2 Orin in September 2026 and still fails. Read the
+comment in `pyproject.toml`, and `CLAUDE.md`'s "Verifying the onnxruntime pin on
+the Orin", before changing it.
 
 ## API
 

@@ -97,13 +97,13 @@ link falls back to the by-name dongle rather than raising.
 - **`/health` always returns 200**; degradation lives in the body (`model`,
   `speaker.thread_alive`). A failing healthcheck would restart-loop the container
   exactly when an operator wants to read the reason.
-- **`onnxruntime` is pinned exactly, and the pin is a hardware decision.** It sat
-  at 1.18.1 for two years because ≥1.19's CPU-topology probe corrupts the heap on
-  the Jetson Orin when `nvpmodel` offlines cores. It is now `==1.23.2` — the last
-  release with a cp310 aarch64 wheel (1.24.4 requires ≥3.11, so going further
-  moves the container's interpreter too). **This is validated off-device only**;
-  see "Verifying the onnxruntime pin on the Orin" below before trusting it in
-  production. Re-read the comment in `pyproject.toml` before touching the pin.
+- **`onnxruntime==1.18.1` is a hardware decision, and it has been retested.** On
+  the Orin, ≥1.19's ARM CPU-detection path indexes past the end of its core list
+  whenever `nvpmodel` keeps cores offline. 1.23.2 was tried on a JetPack 6.2 Orin
+  on 2026-09-21 and **still aborts** — see the comment in `pyproject.toml` for
+  the exact assertion and the upstream issue. It is an `abort()`, not an
+  exception: the process dies and the container restart-loops. Do not attempt
+  the upgrade again until upstream closes it or every core is online.
 - **No ROS, no database, no Temporal client in this process.** Keeping the
   dependency set small is half the reason the split happened.
 - `ruff.toml` pins `select = ["E4", "E7", "E9", "F"]` explicitly and deliberately
@@ -121,9 +121,10 @@ inside the spawn window a cancel can land in.
 
 ## Verifying the onnxruntime pin on the Orin
 
-The heap corruption that froze the pin at 1.18.1 only reproduces on the device,
-with cores offline — no amount of laptop or CI testing settles it. On a JetPack
-6.2 Orin:
+The crash that freezes the pin at 1.18.1 only reproduces on the device, with
+cores offline — no amount of laptop or CI testing settles it, and 1.23.2 passed
+every off-device check (macOS arm64, a linux/arm64 container, real synthesis)
+before failing on the robot within seconds. On a JetPack 6.2 Orin:
 
 ```bash
 nvpmodel -q                       # confirm the mode that offlines cores (MODE_30W: 8-11)
@@ -137,7 +138,19 @@ for i in $(seq 20); do            # the crash is a malloc assertion at session c
 done
 ```
 
-`model: ready` on every iteration, and no `malloc.c` assertion or exit 134 in
+`model: ready` on every iteration, with no assertion and no exit 134 in
 `docker compose logs tts`, is the evidence. Anything else: revert the pin to
-`1.18.1` (and `numpy<2`, plus the `[tool.uv] override-dependencies` block that
-went with it — see git history for the exact stanza).
+`1.18.1`, `numpy<2` and the `[tool.uv] override-dependencies` block that goes
+with it.
+
+The failure looks like this — it is what 1.23.2 produced on 2026-09-21:
+
+```
+onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0
+/opt/rh/gcc-toolset-14/root/usr/include/c++/14/bits/stl_vector.h:1130:
+  Assertion '__n < this->size()' failed.
+```
+
+The `gcc-toolset` version in that path identifies the wheel: 1.18.1 is built
+with gcc-toolset-12, 1.23.x with 14. It is a quick way to tell which pin a
+container is actually running.

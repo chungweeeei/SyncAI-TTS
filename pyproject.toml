@@ -7,11 +7,10 @@ name = "syncai-tts"
 version = "0.1.0"
 description = "Speech synthesis and speaker playback for the SyncAI robot, as a standalone REST service."
 readme = "README.md"
-# 3.10 is the robot container's interpreter (JetPack 6.2 / Ubuntu 22.04), and
-# .python-version pins dev to the same one. The upper bound is kokoro-onnx's.
-# Note onnxruntime drops 3.10 in 1.24.4: moving past 1.23.x means moving the
-# container's interpreter too.
-requires-python = ">=3.10,<3.14"
+# 3.10 is the robot container's interpreter, and .python-version pins dev to the
+# same one. The upper bound is onnxruntime 1.18.1's: it predates 3.13 and
+# publishes no wheels for it, and that pin is not negotiable (see below).
+requires-python = ">=3.10,<3.13"
 
 dependencies = [
     # ── Web stack ────────────────────────────────────────────────────────────
@@ -22,28 +21,36 @@ dependencies = [
     "python-dotenv",   # main.py loads .env before Settings.from_env()
 
     # ── Inference ────────────────────────────────────────────────────────────
-    # onnxruntime is pinned exactly, and the pin is a hardware decision.
+    # onnxruntime is PINNED and the pin is not negotiable on this hardware:
+    # >= 1.19's CPU-topology probe indexes past the end of its core list on the
+    # Jetson Orin whenever nvpmodel keeps cores offline (MODE_30W offlines 8-11).
+    # 1.18.1 predates that code and works.
     #
-    # It sat at 1.18.1 for two years because >= 1.19's CPU-topology probe
-    # corrupts the heap on the Jetson Orin whenever nvpmodel keeps cores offline
-    # (MODE_30W offlines 8-11) — a malloc assertion at InferenceSession
-    # construction, not something the caller can catch. See
-    # https://github.com/microsoft/onnxruntime/discussions/22011 for the class
-    # of failure.
+    # RETESTED 2026-09-21 on a JetPack 6.2 Orin with 1.23.2: STILL BROKEN. The
+    # session dies at construction with
     #
-    # 1.23.2 is the last release that still ships a cp310 aarch64 wheel (1.24.4
-    # requires >= 3.11), which is what makes this upgrade a pin change and
-    # nothing else. Whether the Orin bug is actually gone can only be settled on
-    # the device, with cores offline; see CLAUDE.md for the check.
-    "onnxruntime==1.23.2",
-    # No ceiling any more: ORT gained numpy 2 support in 1.19/1.20, and the old
-    # `numpy<2` belonged to the 1.18.1 pin rather than to ROS. Imported directly
-    # by engine.py, so it is declared here rather than left to kokoro-onnx.
-    "numpy>=2",
-    # Installed normally now. Its metadata (onnxruntime>=1.20.1, numpy>=2.0.2)
-    # is satisfied by the pins above, so the [tool.uv] override-dependencies
-    # block that used to overrule it is gone, and so is the `pip install
-    # --no-deps` it replaced.
+    #   onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0
+    #   .../gcc-toolset-14/.../stl_vector.h:1130: Assertion '__n < this->size()' failed.
+    #
+    # which is an abort() inside the ARM CPU-detection path, not an exception the
+    # service can catch — the process dies and the container restart-loops.
+    # Upstream: https://github.com/microsoft/onnxruntime/issues/25103 (open,
+    # reported against 1.21/1.22). Do not attempt this upgrade again until that
+    # issue closes, or until the robot runs a power mode with every core online.
+    #
+    # Also note 1.24.4 raised requires-python to >= 3.11, so a future upgrade
+    # moves the container's interpreter too.
+    "onnxruntime==1.18.1",
+    # onnxruntime 1.18.1 predates numpy 2 (ORT gained numpy 2 support in
+    # 1.19/1.20), so this ceiling belongs to the runtime pin above rather than to
+    # ROS, which no longer shares this process.
+    "numpy<2",
+    # kokoro-onnx's own metadata demands onnxruntime>=1.20.1 and numpy>=2, both
+    # wrong for this machine, while the API it actually calls is fine against the
+    # pins above. [tool.uv] override-dependencies is what makes that resolvable —
+    # it replaces the metadata rather than skipping the dependencies, so colorlog,
+    # espeakng-loader and phonemizer-fork are still resolved and locked instead of
+    # being hand-listed the way `pip install --no-deps` forced.
     "kokoro-onnx",
 ]
 
@@ -58,6 +65,16 @@ dev = [
     "pytest>=7,<9",
     "httpx",  # required by fastapi.testclient.TestClient
     "ruff",
+]
+
+[tool.uv]
+# Applied to every package in the graph, including transitive metadata. This is
+# the uv-native replacement for the Dockerfile's `pip install --no-deps
+# kokoro-onnx` plus a hand-maintained list of its real dependencies: the pins
+# win, and kokoro-onnx's actual deps are still resolved and locked.
+override-dependencies = [
+    "onnxruntime==1.18.1",
+    "numpy<2",
 ]
 
 [tool.setuptools]
