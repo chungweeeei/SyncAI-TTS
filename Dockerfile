@@ -74,13 +74,15 @@ RUN useradd --create-home --shell /bin/bash --groups audio syncai
 USER syncai
 
 # The model is a volume, not a layer: ~310 MB of weights in the image would be
-# rebuilt and re-pushed on every source change, and the robot already has them
-# on disk at ~/robot_ws/models/kokoro.
+# rebuilt and re-pushed on every source change. docker-compose.yml mounts the
+# repo's own models/kokoro/ here, read-only; see models/README.md.
 ENV TTS_MODEL_PATH=/models/kokoro/kokoro-v1.0.onnx \
     TTS_VOICES_PATH=/models/kokoro/voices-v1.0.bin \
     TTS_HOST=0.0.0.0 \
     TTS_PORT=8080
 
+# Documentation only; docker-compose.yml deliberately publishes nothing to the
+# host. Callers are sibling containers on the `syncai` network.
 EXPOSE 8080
 
 # Always 200 while the process is alive; the body carries `degraded`. A

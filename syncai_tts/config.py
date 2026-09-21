@@ -27,7 +27,14 @@ def _env_str(name: str, default: str) -> str:
 
 
 def _env_path(name: str, default: str) -> str:
-    return os.path.expanduser(_env_str(name, default))
+    """Expand ~ and make the path absolute.
+
+    The model defaults are repo-relative (``models/kokoro/...``), so they resolve
+    against the working directory the service was started from. Absolutising here
+    means a "file missing" message names the path we actually looked at rather
+    than a relative fragment the reader has to resolve themselves.
+    """
+    return os.path.abspath(os.path.expanduser(_env_str(name, default)))
 
 
 def _env_int(name: str, default: int) -> int:
@@ -90,12 +97,11 @@ class Settings:
             host=_env_str("TTS_HOST", "0.0.0.0"),
             port=_env_int("TTS_PORT", 8080),
             cors_origins=_env_list("TTS_CORS_ORIGINS"),
-            model_path=_env_path(
-                "TTS_MODEL_PATH", "~/robot_ws/models/kokoro/kokoro-v1.0.onnx"
-            ),
-            voices_path=_env_path(
-                "TTS_VOICES_PATH", "~/robot_ws/models/kokoro/voices-v1.0.bin"
-            ),
+            # The weights live in this repo, under models/ (gitignored, and
+            # bind-mounted into the container at /models by docker-compose.yml
+            # rather than baked into the image — see models/README.md).
+            model_path=_env_path("TTS_MODEL_PATH", "models/kokoro/kokoro-v1.0.onnx"),
+            voices_path=_env_path("TTS_VOICES_PATH", "models/kokoro/voices-v1.0.bin"),
             intra_op_threads=_env_int("TTS_INTRA_OP_THREADS", 4),
             preload=_env_bool("TTS_PRELOAD", True),
             default_voice=_env_str("TTS_DEFAULT_VOICE", "af_heart"),

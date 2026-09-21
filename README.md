@@ -9,19 +9,52 @@ played one at a time.
 
 ## Running
 
+Fetch the weights into the repo first — they are gitignored, and
+`models/README.md` has the two `curl` commands:
+
+```
+models/kokoro/kokoro-v1.0.onnx   # ~310 MB
+models/kokoro/voices-v1.0.bin    # ~27 MB
+```
+
+Then:
+
 ```bash
 docker compose up --build
 ```
 
-The device wiring is the fiddly part and it all lives in `docker-compose.yml`:
-`/dev/snd` as a device, `/dev/syncai` read-only for the udev symlink, the
-weights bind-mounted at `/models/kokoro`, and `group_add` set to the **host's**
-audio gid (`getent group audio | cut -d: -f3`).
+**The service is not published to the host.** There is no `ports:` in
+`docker-compose.yml` on purpose: the callers are other containers, and they
+reach it by name on the shared `syncai` network. Publishing 8080 would put an
+unauthenticated speaker on the robot's LAN.
 
-The weights are a volume, not an image layer — 310 MB would be rebuilt and
-re-pushed on every source change. Download them once from the
-[kokoro-onnx model-files release](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1):
-`kokoro-v1.0.onnx` and `voices-v1.0.bin`.
+A calling stack joins the network and talks to the container name:
+
+```yaml
+services:
+  backend:
+    environment:
+      TTS_BASE_URL: http://syncai_tts:8080
+    networks: [syncai]
+
+networks:
+  syncai:
+    external: true        # whichever stack starts first creates it
+```
+
+To poke it by hand, go in through the container rather than reopening the port:
+
+```bash
+docker compose exec tts python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').read().decode())"
+```
+
+The device wiring is the other fiddly part, and it is all in
+`docker-compose.yml`: `/dev/snd` as a device, `/dev/syncai` read-only for the
+udev symlink, `./models/kokoro` mounted read-only at `/models/kokoro`, and
+`group_add` set to the **host's** audio gid
+(`getent group audio | cut -d: -f3`). The weights are a mount, not an image
+layer — 310 MB would be rebuilt and re-pushed on every source change.
 
 Locally, without Docker:
 
@@ -122,8 +155,8 @@ is the annotated list; the ones worth knowing:
 | variable | default | notes |
 |---|---|---|
 | `TTS_PORT` | `8080` | |
-| `TTS_MODEL_PATH` | `~/robot_ws/models/kokoro/kokoro-v1.0.onnx` | `/models/...` in the image |
-| `TTS_VOICES_PATH` | `~/robot_ws/models/kokoro/voices-v1.0.bin` | |
+| `TTS_MODEL_PATH` | `models/kokoro/kokoro-v1.0.onnx` | repo-relative; `/models/...` in the image |
+| `TTS_VOICES_PATH` | `models/kokoro/voices-v1.0.bin` | |
 | `TTS_PRELOAD` | `true` | load the session at startup, in a background thread |
 | `TTS_MAX_QUEUE` | `8` | utterances allowed to wait behind the one playing |
 | `TTS_JOB_HISTORY` | `64` | finished jobs kept readable |
@@ -160,6 +193,7 @@ docker run --rm -v "$PWD:/app" syncai-tts:dev pytest test/ -q
 ## Layout
 
 ```
+models/kokoro/     the weights: gitignored, mounted into the container
 syncai_tts/
   main.py          entrypoint: load .env, build settings/engine/player, serve
   config.py        Settings.from_env() — every value read here, not at import

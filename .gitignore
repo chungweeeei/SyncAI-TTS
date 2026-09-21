@@ -8,4 +8,7 @@ venv/
 .env
 .pytest_cache/
 .ruff_cache/
-models/
+# The kokoro weights (~310 MB) are fetched, not committed; the directory and
+# its README stay in the repo so the bind mount has a fixed place to look.
+models/*
+!models/README.md

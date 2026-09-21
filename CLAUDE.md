@@ -19,7 +19,19 @@ In Docker (the only way to actually reach the speaker):
 ```bash
 docker compose up --build
 docker build --target dev -t syncai-tts:dev . && docker run --rm -v "$PWD:/app" syncai-tts:dev pytest test/ -q
+docker compose exec tts python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').read().decode())"
 ```
+
+The weights live in the repo at `models/kokoro/` (gitignored; `models/README.md`
+has the download commands) and are bind-mounted read-only at `/models/kokoro` —
+never baked into the image.
+
+**The service is not published to the host.** `docker-compose.yml` has no
+`ports:`, only `expose`. Callers are sibling containers on the external-by-name
+`syncai` network and reach it at `http://syncai_tts:8080`; there is no
+authentication, so publishing the port would put the speaker on the robot's LAN.
+Do not add `ports:` to debug — use the `exec` line above.
 
 Commits follow Conventional Commits — see `.github/prompt/copilot-commit-message-instructions.md`.
 
