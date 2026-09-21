@@ -18,8 +18,8 @@ services:
     # at http://syncai_tts:8080. Publishing the port would expose the speaker
     # to anything on the robot's LAN, and there is no authentication here.
     # `expose` documents the port; it publishes nothing.
-    expose:
-      - "8080"
+    ports:
+      - "9090:8080"
 
     # /dev/snd is the sound card. /dev/syncai carries the udev symlink
     # (speaker_pcm -> ../snd/pcmC<card>D<dev>p) that syncai_sys_manager's
