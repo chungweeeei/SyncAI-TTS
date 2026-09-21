@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syncai-tts"
+version = "0.1.0"
+description = "Speech synthesis and speaker playback for the SyncAI robot, as a standalone REST service."
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[project.scripts]
+syncai-tts = "syncai_tts.main:main"
+
+[tool.setuptools]
+packages = ["syncai_tts", "syncai_tts.api"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["test"]

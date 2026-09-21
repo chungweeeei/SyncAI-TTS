@@ -1,0 +1,49 @@
+# Standalone compose for syncai_tts. On the robot this service is folded into
+# the workspace's compose stack instead; keep the device and volume wiring below
+# in step with it, because that wiring is the whole difficulty of running this.
+
+services:
+  tts:
+    build:
+      context: .
+      target: runtime
+    image: syncai-tts
+    container_name: syncai_tts
+    restart: unless-stopped
+
+    ports:
+      - "8080:8080"
+
+    # /dev/snd is the sound card. /dev/syncai carries the udev symlink
+    # (speaker_pcm -> ../snd/pcmC<card>D<dev>p) that syncai_sys_manager's
+    # 99-syncai-devices.rules maintains; the service reads it per utterance so a
+    # replug that moves the card number is followed rather than cached.
+    devices:
+      - /dev/snd:/dev/snd
+    volumes:
+      - /dev/syncai:/dev/syncai:ro
+      # The weights, ~310 MB, mounted rather than baked into the image.
+      - ${HOME}/robot_ws/models/kokoro:/models/kokoro:ro
+
+    # The container user is in `audio`, but the host's audio gid is what governs
+    # /dev/snd. Set this to the host's: `getent group audio | cut -d: -f3`.
+    group_add:
+      - "29"
+
+    environment:
+      TTS_PORT: "8080"
+      TTS_PRELOAD: "true"
+      TTS_LOG_JSON: "false"
+      TTS_MAX_QUEUE: "8"
+      # Left unset: the callers are syncai_backend and the Temporal worker, both
+      # server-side. Set only if a browser ever calls this service directly.
+      # TTS_CORS_ORIGINS: ""
+
+    # Speech is not worth restarting the robot's network stack for; the service
+    # is reachable from the backend over the shared network by name.
+    networks:
+      - syncai
+
+networks:
+  syncai:
+    driver: bridge

@@ -1,0 +1,17 @@
+# Ruff config for syncai_tts.
+#
+# Same rule set and rationale as syncai_backend's ruff.toml, so the two repos
+# lint identically and a file moved between them does not change verdict. The
+# select is pinned explicitly rather than inherited, because Ruff's defaults
+# widen between versions (the 2026 VSCode extension enables ~414 rules) and a
+# rule set that changes on an editor upgrade is not a rule set.
+
+target-version = "py310"  # the robot container is Python 3.10
+line-length = 100
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+# isort (`I`) is deliberately not selected, matching syncai_backend: imports are
+# grouped by layer with blank lines carrying that meaning, and "Organize
+# imports" collapses the groups.

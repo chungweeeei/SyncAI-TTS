@@ -1,0 +1,35 @@
+# Runtime dependencies for syncai_tts.
+#
+# This file is the single source of truth for the service's python deps; the
+# Dockerfile installs from it. Deliberately small: this process holds no ROS,
+# no database and no Temporal client, which is the whole point of splitting it
+# out of syncai_backend — the pins below only have to agree with each other and
+# with the Orin, not with the ROS ecosystem's numpy.
+
+# ── Web stack ────────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+pydantic>=2.11  # Field(..., ge=/le=) on floats + model_config are 2.x; 2.11 matches syncai_backend
+structlog       # every module logs through structlog (see logger.py)
+python-dotenv   # main.py loads .env before Settings.from_env()
+
+# ── Inference ────────────────────────────────────────────────────────────────
+# onnxruntime is PINNED and the pin is not negotiable on this hardware:
+# >= 1.19's CPU-topology probe corrupts the heap on the Jetson Orin whenever
+# nvpmodel keeps cores offline (MODE_30W offlines 8-11). 1.18.1 predates that
+# code and works. Carried over verbatim from syncai_backend/requirements.txt;
+# the reason lives in the hardware, not in the process it used to run in.
+onnxruntime==1.18.1
+
+# onnxruntime 1.18.1 predates numpy 2 (ORT gained numpy 2 support in 1.19/1.20),
+# so the ceiling belongs to the runtime pin above rather than to ROS, which no
+# longer shares this process.
+numpy<2
+
+# kokoro-onnx itself is NOT here. Its metadata demands onnxruntime>=1.20.1 and
+# numpy>=2, both wrong for this machine (see above), while the API it actually
+# calls is fine against the pins here. The Dockerfile therefore installs it with
+# --no-deps and its real dependencies are spelled out instead:
+colorlog          # kokoro-onnx dep
+espeakng-loader   # kokoro-onnx dep (bundled espeak-ng for English G2P)
+phonemizer-fork   # kokoro-onnx dep
