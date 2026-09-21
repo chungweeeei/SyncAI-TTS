@@ -6,17 +6,65 @@ build-backend = "setuptools.build_meta"
 name = "syncai-tts"
 version = "0.1.0"
 description = "Speech synthesis and speaker playback for the SyncAI robot, as a standalone REST service."
-requires-python = ">=3.10"
-dynamic = ["dependencies"]
+readme = "README.md"
+# 3.10 is the robot container's interpreter, and .python-version pins dev to the
+# same one. The upper bound is onnxruntime 1.18.1's: it predates 3.13 and
+# publishes no wheels for it, and that pin is not negotiable (see below).
+requires-python = ">=3.10,<3.13"
+
+dependencies = [
+    # ── Web stack ────────────────────────────────────────────────────────────
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2.11",  # Field(ge=/le=) on floats + model_config; 2.11 matches syncai_backend
+    "structlog",       # every module logs through structlog (see logger.py)
+    "python-dotenv",   # main.py loads .env before Settings.from_env()
+
+    # ── Inference ────────────────────────────────────────────────────────────
+    # onnxruntime is PINNED and the pin is not negotiable on this hardware:
+    # >= 1.19's CPU-topology probe corrupts the heap on the Jetson Orin whenever
+    # nvpmodel keeps cores offline (MODE_30W offlines 8-11). 1.18.1 predates that
+    # code and works. The reason lives in the hardware, not in the process this
+    # service used to run inside.
+    "onnxruntime==1.18.1",
+    # onnxruntime 1.18.1 predates numpy 2 (ORT gained numpy 2 support in
+    # 1.19/1.20), so this ceiling belongs to the runtime pin above rather than to
+    # ROS, which no longer shares this process.
+    "numpy<2",
+    # kokoro-onnx's own metadata demands onnxruntime>=1.20.1 and numpy>=2, both
+    # wrong for this machine, while the API it actually calls is fine against the
+    # pins above. [tool.uv] override-dependencies is what makes that resolvable —
+    # it replaces the metadata rather than skipping the dependencies, so colorlog,
+    # espeakng-loader and phonemizer-fork are still resolved and locked instead of
+    # being hand-listed the way `pip install --no-deps` forced.
+    "kokoro-onnx",
+]
 
 [project.scripts]
 syncai-tts = "syncai_tts.main:main"
 
+[dependency-groups]
+# Installed by `uv sync`, excluded by `uv sync --no-dev` (what the runtime image
+# does). Nothing here needs onnxruntime, ALSA or a model file: the suite fakes
+# the kokoro session and patches the aplay subprocess.
+dev = [
+    "pytest>=7,<9",
+    "httpx",  # required by fastapi.testclient.TestClient
+    "ruff",
+]
+
+[tool.uv]
+# Applied to every package in the graph, including transitive metadata. This is
+# the uv-native replacement for the Dockerfile's `pip install --no-deps
+# kokoro-onnx` plus a hand-maintained list of its real dependencies: the pins
+# win, and kokoro-onnx's actual deps are still resolved and locked.
+override-dependencies = [
+    "onnxruntime==1.18.1",
+    "numpy<2",
+]
+
 [tool.setuptools]
 packages = ["syncai_tts", "syncai_tts.api"]
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
 
 [tool.pytest.ini_options]
 testpaths = ["test"]

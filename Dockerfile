@@ -6,8 +6,11 @@
 # space as the nav2 action client and the teleop watchdog. Here the only
 # constraints are onnxruntime's own, so the base is plain python:3.10-slim.
 #
-# 3.10 matches the robot container's interpreter, so a wheel that resolves here
-# resolves there.
+# 3.10 matches the robot container's interpreter and .python-version, so a wheel
+# that resolves on a laptop resolves here.
+#
+# Dependencies come from uv.lock — the same resolution developers run, byte for
+# byte, rather than a requirements.txt that drifts from it.
 #
 # Build:
 #   docker build -t syncai-tts .
@@ -19,9 +22,24 @@ ARG PYTHON_VERSION=3.10
 # ── base ─────────────────────────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim AS base
 
+# uv as a static binary rather than `pip install uv`: it keeps the tool out of
+# the environment it manages, and the version is pinned like any other input.
+# Pinned: bump this line and uv.lock together.
+COPY --from=ghcr.io/astral-sh/uv:0.10.8 /uv /bin/uv
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    # The venv lives outside /app because the dev stage bind-mounts the source
+    # over /app, which would otherwise hide it.
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    # Use the image's interpreter instead of downloading a managed CPython: it
+    # is already 3.10, and a second copy would only add ~50 MB.
+    UV_PYTHON=/usr/local/bin/python3 \
+    UV_PYTHON_DOWNLOADS=never \
+    # Hardlinking across the cache mount's filesystem boundary is not possible.
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
 
 # alsa-utils is `aplay`, which is how audio reaches the speaker — the service
 # writes a WAV to its stdin rather than linking an audio library, so this is the
@@ -36,15 +54,11 @@ RUN apt-get update \
 WORKDIR /app
 
 # Dependencies before source, so an edit to the service does not reinstall
-# onnxruntime.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# kokoro-onnx last and --no-deps, because its metadata demands
-# onnxruntime>=1.20.1 and numpy>=2 and both are wrong for the Orin (the pin's
-# reasoning is in requirements.txt). Its real dependencies are already installed
-# above, spelled out.
-RUN pip install --no-cache-dir --no-deps kokoro-onnx
+# onnxruntime. --no-install-project is what makes that split work: the lock's
+# third-party packages land here, the project itself in the runtime stage.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
 
 # ── dev ──────────────────────────────────────────────────────────────────────
 # Test and lint image. Source is bind-mounted rather than copied, so an edit
@@ -52,8 +66,8 @@ RUN pip install --no-cache-dir --no-deps kokoro-onnx
 #   docker run --rm -v "$PWD:/app" syncai-tts:dev pytest test/ -q
 FROM base AS dev
 
-COPY requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements-dev.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
 
 # The suite fakes the kokoro session and the aplay subprocess, so it needs
 # neither the model nor a sound card and passes in this image with nothing
@@ -64,8 +78,9 @@ CMD ["pytest", "test/", "-q"]
 FROM base AS runtime
 
 COPY syncai_tts/ ./syncai_tts/
-COPY pyproject.toml README.md ./
-RUN pip install --no-cache-dir --no-deps -e .
+COPY README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 # Non-root, and in `audio` so /dev/snd is reachable. The host's audio gid may
 # differ from the container's; docker-compose.yml passes `group_add` for that

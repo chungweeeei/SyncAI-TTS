@@ -4,14 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-The local `.venv` has only the web stack (`onnxruntime==1.18.1` has no wheels for
-recent Pythons — see below), which is enough for the whole suite:
+The project is managed with **uv**. `pyproject.toml` declares the dependencies,
+`uv.lock` is committed and is what the image installs, and `.python-version`
+pins CPython 3.10 — the container's interpreter, and the reason
+`onnxruntime==1.18.1` (no wheels for 3.13+) installs on a laptop at all. There
+is no `requirements.txt`; do not reintroduce one.
 
 ```bash
-.venv/bin/python -m pytest test/ -q          # full suite (~3 s, 67 tests)
-.venv/bin/python -m pytest test/test_player.py::test_name -q   # one test
-.venv/bin/python -m ruff check .             # lint
-syncai-tts                                   # run the service (or: python -m syncai_tts.main)
+uv sync                                         # create/update .venv from the lock
+uv run pytest test/ -q                          # full suite (~3 s, 67 tests)
+uv run pytest test/test_player.py::test_name -q # one test
+uv run ruff check .                             # lint
+uv run syncai-tts                               # run the service
+uv add <pkg>            # or: uv add --dev <pkg>; then commit the lock change
+uv lock --upgrade-package <pkg>
 ```
 
 In Docker (the only way to actually reach the speaker):
@@ -25,7 +31,8 @@ docker compose exec tts python -c \
 
 The weights live in the repo at `models/kokoro/` (gitignored; `models/README.md`
 has the download commands) and are bind-mounted read-only at `/models/kokoro` —
-never baked into the image.
+never baked into the image. In the image the venv is at `/opt/venv`, outside
+`/app`, so the dev stage's source bind mount does not hide it.
 
 **The service is not published to the host.** `docker-compose.yml` has no
 `ports:`, only `expose`. Callers are sibling containers on the external-by-name
@@ -92,8 +99,10 @@ link falls back to the by-name dongle rather than raising.
   exactly when an operator wants to read the reason.
 - **`onnxruntime==1.18.1` and `numpy<2` are not negotiable.** ≥1.19's CPU-topology
   probe corrupts the heap on the Jetson Orin when `nvpmodel` offlines cores.
-  `kokoro-onnx` is therefore installed `--no-deps` and its real deps (`colorlog`,
-  `espeakng-loader`, `phonemizer-fork`) are spelled out in `requirements.txt`.
+  `kokoro-onnx`'s metadata disagrees (it wants `onnxruntime>=1.20.1`, `numpy>=2`);
+  `[tool.uv] override-dependencies` overrules it, so its real deps are resolved
+  and locked rather than hand-listed beside a `--no-deps` install. Changing
+  either pin means re-reading that comment in `pyproject.toml` first.
 - **No ROS, no database, no Temporal client in this process.** Keeping the
   dependency set small is half the reason the split happened.
 - `ruff.toml` pins `select = ["E4", "E7", "E9", "F"]` explicitly and deliberately

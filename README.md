@@ -56,19 +56,33 @@ udev symlink, `./models/kokoro` mounted read-only at `/models/kokoro`, and
 (`getent group audio | cut -d: -f3`). The weights are a mount, not an image
 layer — 310 MB would be rebuilt and re-pushed on every source change.
 
-Locally, without Docker:
+Locally, without Docker — the project is managed with
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements-dev.txt
+uv sync                 # creates .venv from uv.lock; fetches CPython 3.10 if needed
 cp .env.example .env
-syncai-tts
+uv run syncai-tts
 ```
 
-`onnxruntime==1.18.1` has no wheels for recent Pythons. Where it will not
-install, install the web stack alone (`fastapi uvicorn pydantic structlog
-python-dotenv pytest httpx numpy`) — the test suite needs nothing more, and the
-service still serves `/health` and every error path.
+`uv sync` is the whole setup. `.python-version` pins 3.10, the same interpreter
+the container runs, which is what makes `onnxruntime==1.18.1` installable on a
+laptop at all — it publishes no wheels for 3.13+.
+
+Dependencies live in `pyproject.toml` and resolve into `uv.lock`, which is
+committed and is what the image installs:
+
+```bash
+uv add <pkg>                    # or: uv add --dev <pkg>
+uv lock --upgrade-package <pkg> # re-resolve one package
+uv sync --no-dev                # what the runtime image installs
+```
+
+`kokoro-onnx`'s metadata demands `onnxruntime>=1.20.1` and `numpy>=2`, both
+wrong for the Orin. `[tool.uv] override-dependencies` in `pyproject.toml`
+overrules that metadata, which is why its real dependencies (`colorlog`,
+`espeakng-loader`, `phonemizer-fork`) are resolved and locked instead of being
+hand-listed next to a `pip install --no-deps`.
 
 ## API
 
@@ -167,8 +181,9 @@ is the annotated list; the ones worth knowing:
 ## Tests
 
 ```bash
-pytest test/ -q
-ruff check .
+uv run pytest test/ -q
+uv run pytest test/test_player.py::test_name -q   # one test
+uv run ruff check .
 ```
 
 **No test needs ROS, onnxruntime, a model file or a sound card**: the kokoro
@@ -190,9 +205,14 @@ docker build --target dev -t syncai-tts:dev .
 docker run --rm -v "$PWD:/app" syncai-tts:dev pytest test/ -q
 ```
 
+The venv lives at `/opt/venv` in the image, outside `/app`, precisely so that
+bind mount does not hide it.
+
 ## Layout
 
 ```
+pyproject.toml     dependencies, uv config, ruff/pytest settings
+uv.lock            the committed resolution; the image installs from it
 models/kokoro/     the weights: gitignored, mounted into the container
 syncai_tts/
   main.py          entrypoint: load .env, build settings/engine/player, serve

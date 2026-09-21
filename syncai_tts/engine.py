@@ -137,9 +137,9 @@ class KokoroEngine:
             for path in (self._settings.model_path, self._settings.voices_path):
                 if not os.path.isfile(path):
                     detail = (
-                        f"kokoro model file missing: {path} — download it from the "
-                        "kokoro-onnx 'model-files' GitHub release (URLs in "
-                        ".env.example)"
+                        f"kokoro model file missing: {path} — fetch the weights "
+                        "into models/kokoro/ (the curl commands are in "
+                        "models/README.md)"
                     )
                     self._set_state(STATE_MISSING, detail)
                     raise UnavailableError(detail, code=Failure.MODEL_UNAVAILABLE)
