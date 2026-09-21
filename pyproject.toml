@@ -22,10 +22,24 @@ dependencies = [
 
     # ── Inference ────────────────────────────────────────────────────────────
     # onnxruntime is PINNED and the pin is not negotiable on this hardware:
-    # >= 1.19's CPU-topology probe corrupts the heap on the Jetson Orin whenever
-    # nvpmodel keeps cores offline (MODE_30W offlines 8-11). 1.18.1 predates that
-    # code and works. The reason lives in the hardware, not in the process this
-    # service used to run inside.
+    # >= 1.19's CPU-topology probe indexes past the end of its core list on the
+    # Jetson Orin whenever nvpmodel keeps cores offline (MODE_30W offlines 8-11).
+    # 1.18.1 predates that code and works.
+    #
+    # RETESTED 2026-09-21 on a JetPack 6.2 Orin with 1.23.2: STILL BROKEN. The
+    # session dies at construction with
+    #
+    #   onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0
+    #   .../gcc-toolset-14/.../stl_vector.h:1130: Assertion '__n < this->size()' failed.
+    #
+    # which is an abort() inside the ARM CPU-detection path, not an exception the
+    # service can catch — the process dies and the container restart-loops.
+    # Upstream: https://github.com/microsoft/onnxruntime/issues/25103 (open,
+    # reported against 1.21/1.22). Do not attempt this upgrade again until that
+    # issue closes, or until the robot runs a power mode with every core online.
+    #
+    # Also note 1.24.4 raised requires-python to >= 3.11, so a future upgrade
+    # moves the container's interpreter too.
     "onnxruntime==1.18.1",
     # onnxruntime 1.18.1 predates numpy 2 (ORT gained numpy 2 support in
     # 1.19/1.20), so this ceiling belongs to the runtime pin above rather than to

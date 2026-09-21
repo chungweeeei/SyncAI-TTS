@@ -97,12 +97,13 @@ link falls back to the by-name dongle rather than raising.
 - **`/health` always returns 200**; degradation lives in the body (`model`,
   `speaker.thread_alive`). A failing healthcheck would restart-loop the container
   exactly when an operator wants to read the reason.
-- **`onnxruntime==1.18.1` and `numpy<2` are not negotiable.** ≥1.19's CPU-topology
-  probe corrupts the heap on the Jetson Orin when `nvpmodel` offlines cores.
-  `kokoro-onnx`'s metadata disagrees (it wants `onnxruntime>=1.20.1`, `numpy>=2`);
-  `[tool.uv] override-dependencies` overrules it, so its real deps are resolved
-  and locked rather than hand-listed beside a `--no-deps` install. Changing
-  either pin means re-reading that comment in `pyproject.toml` first.
+- **`onnxruntime==1.18.1` is a hardware decision, and it has been retested.** On
+  the Orin, ≥1.19's ARM CPU-detection path indexes past the end of its core list
+  whenever `nvpmodel` keeps cores offline. 1.23.2 was tried on a JetPack 6.2 Orin
+  on 2026-09-21 and **still aborts** — see the comment in `pyproject.toml` for
+  the exact assertion and the upstream issue. It is an `abort()`, not an
+  exception: the process dies and the container restart-loops. Do not attempt
+  the upgrade again until upstream closes it or every core is online.
 - **No ROS, no database, no Temporal client in this process.** Keeping the
   dependency set small is half the reason the split happened.
 - `ruff.toml` pins `select = ["E4", "E7", "E9", "F"]` explicitly and deliberately
@@ -117,3 +118,39 @@ replaced could only run inside the robot container, and so the one thing it
 owned — who may touch the speaker — was barely covered. `FakeAplay.max_inside`
 is how concurrency on the device is asserted; `FakeAplay.gate` holds the player
 inside the spawn window a cancel can land in.
+
+## Verifying the onnxruntime pin on the Orin
+
+The crash that freezes the pin at 1.18.1 only reproduces on the device, with
+cores offline — no amount of laptop or CI testing settles it, and 1.23.2 passed
+every off-device check (macOS arm64, a linux/arm64 container, real synthesis)
+before failing on the robot within seconds. On a JetPack 6.2 Orin:
+
+```bash
+nvpmodel -q                       # confirm the mode that offlines cores (MODE_30W: 8-11)
+nproc                             # fewer than the full core count = the failing condition
+docker compose up -d --build
+for i in $(seq 20); do            # the crash is a malloc assertion at session construction,
+  docker compose restart tts      # and it is intermittent — one clean start proves nothing
+  sleep 15
+  docker compose exec -T tts python -c \
+    "import urllib.request,json; print(json.load(urllib.request.urlopen('http://127.0.0.1:8080/health'))['model'])"
+done
+```
+
+`model: ready` on every iteration, with no assertion and no exit 134 in
+`docker compose logs tts`, is the evidence. Anything else: revert the pin to
+`1.18.1`, `numpy<2` and the `[tool.uv] override-dependencies` block that goes
+with it.
+
+The failure looks like this — it is what 1.23.2 produced on 2026-09-21:
+
+```
+onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0
+/opt/rh/gcc-toolset-14/root/usr/include/c++/14/bits/stl_vector.h:1130:
+  Assertion '__n < this->size()' failed.
+```
+
+The `gcc-toolset` version in that path identifies the wheel: 1.18.1 is built
+with gcc-toolset-12, 1.23.x with 14. It is a quick way to tell which pin a
+container is actually running.
