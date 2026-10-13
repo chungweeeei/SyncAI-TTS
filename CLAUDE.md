@@ -65,7 +65,9 @@ singletons, and tests depend on that.
 **Two resources, two locks, two objects.** `engine.py` owns the kokoro session
 (synthesis, a few hundred ms); `player.py` owns the speaker (playback, as long
 as the utterance). They must never share a lock — a caller that only wants WAV
-bytes must not wait out someone else's utterance.
+bytes must not wait out someone else's utterance. The engine caches rendered
+`Utterance`s by `(text, voice, speed)` (LRU); the voice is checked before the
+cache and failures are never cached.
 
 **`player.py` is the heart of the repo.** One worker thread drains a bounded
 FIFO deque; every field of `_Job` is written under the player's lock, and the

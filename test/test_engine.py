@@ -121,9 +121,10 @@ def test_synthesis_is_serialised_by_the_session_lock(engine, kokoro):
     threads = [
         threading.Thread(
             target=engine.synthesize,
-            kwargs={"text": "hello", "voice": "af_heart", "speed": 1.0},
+            # Distinct texts, so the cache does not answer.
+            kwargs={"text": f"hello {n}", "voice": "af_heart", "speed": 1.0},
         )
-        for _ in range(4)
+        for n in range(4)
     ]
     for thread in threads:
         thread.start()
@@ -141,3 +142,69 @@ def test_an_already_loaded_session_is_not_rebuilt(engine, kokoro):
     engine.ensure_loaded()
     assert engine._kokoro is kokoro
     assert engine.state == STATE_READY
+
+
+# --- Synthesis cache ----------------------------------------------------------
+
+
+def test_the_same_line_is_rendered_once(engine, kokoro):
+    first = engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+    second = engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+
+    assert kokoro.calls == [("hello", "af_heart", 1.0)]
+    assert second == first
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        dict(text="goodbye", voice="af_heart", speed=1.0),
+        dict(text="hello", voice="am_adam", speed=1.0),
+        dict(text="hello", voice="af_heart", speed=1.5),
+    ],
+)
+def test_text_voice_and_speed_are_all_part_of_the_key(engine, kokoro, other):
+    engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+    engine.synthesize(**other)
+    assert len(kokoro.calls) == 2
+
+
+def test_the_least_recently_used_line_is_evicted_first(engine, kokoro):
+    for text in ["a", "b", "c", "d"]:  # fills the test cache of 4
+        engine.synthesize(text=text, voice="af_heart", speed=1.0)
+    engine.synthesize(text="a", voice="af_heart", speed=1.0)  # a is now newest
+    engine.synthesize(text="e", voice="af_heart", speed=1.0)  # evicts b
+
+    kokoro.calls.clear()
+    engine.synthesize(text="a", voice="af_heart", speed=1.0)
+    engine.synthesize(text="b", voice="af_heart", speed=1.0)
+
+    assert kokoro.calls == [("b", "af_heart", 1.0)]
+    assert engine.cache_size() == 4
+
+
+def test_a_cache_size_of_zero_renders_every_time(logger, kokoro):
+    engine = KokoroEngine(logger=logger, settings=make_settings(synthesis_cache_size=0))
+    engine._kokoro = kokoro
+    engine._set_state(STATE_READY)
+
+    engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+    engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+
+    assert len(kokoro.calls) == 2
+    assert engine.cache_size() == 0
+
+
+def test_a_failed_synthesis_is_not_cached(engine, kokoro):
+    real_create = kokoro.create
+
+    def _explode(text, voice, speed):
+        raise RuntimeError("phonemizer fell over")
+
+    kokoro.create = _explode
+    with pytest.raises(EngineError):
+        engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+
+    kokoro.create = real_create
+    engine.synthesize(text="hello", voice="af_heart", speed=1.0)
+    assert kokoro.calls == [("hello", "af_heart", 1.0)]

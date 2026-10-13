@@ -37,6 +37,7 @@ def make_settings(**overrides) -> Settings:
         intra_op_threads=1,
         preload=False,
         default_voice="af_heart",
+        synthesis_cache_size=4,
         speaker_pcm_link="/nonexistent/speaker_pcm",
         fallback_device="plughw:CARD=TEST,DEV=0",
         max_queue=4,

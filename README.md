@@ -161,6 +161,9 @@ Notes worth knowing:
 - Synthesis happens inline, so the two failures a caller can act on — unknown
   voice (400) and missing weights (503) — come back synchronously rather than
   being discovered by polling. Only playback becomes a job.
+- Rendered audio is cached by `(text, voice, speed)` (LRU,
+  `TTS_SYNTHESIS_CACHE_SIZE`, default 32), so a repeated line is synthesised
+  once.
 - `"wait": true` holds the response until playback finishes and answers `200`.
   That keeps the backend's existing blocking contract for the console while a
   Temporal activity uses the polling form. A wait that expires is still `202`
@@ -168,8 +171,9 @@ Notes worth knowing:
 - Cancelling an already-finished job answers `200` with its terminal state, so a
   caller racing its own cancel against the end of an utterance does not have to
   tell the two apart.
-- `/health` reports `model` (`unloaded`/`loading`/`ready`/`missing`/`error`) and
-  `speaker` (state, queue depth, `thread_alive`). It stays 200 because a
+- `/health` reports `model` (`unloaded`/`loading`/`ready`/`missing`/`error`),
+  `synthesis_cache` (`size`, `max`) and `speaker` (state, queue depth,
+  `thread_alive`). It stays 200 because a
   healthcheck that failed on missing weights would restart-loop the container
   exactly when an operator wants to read the reason.
 

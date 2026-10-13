@@ -150,6 +150,10 @@ def create_app(
             "model": model_state,
             "model_error": engine.error,
             "model_path": settings.model_path,
+            "synthesis_cache": {
+                "size": engine.cache_size(),
+                "max": settings.synthesis_cache_size,
+            },
             "speaker": speaker,
         }
 
