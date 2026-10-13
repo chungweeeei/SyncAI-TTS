@@ -18,6 +18,7 @@ def test_defaults_apply_when_nothing_is_set(monkeypatch):
     assert settings.cors_origins == []
     assert settings.default_voice == "af_heart"
     assert settings.preload is True
+    assert settings.synthesis_cache_size == 32
 
 
 def test_the_environment_is_read_when_from_env_is_called_not_at_import(monkeypatch):
@@ -66,4 +67,10 @@ def test_a_bad_value_fails_at_startup_not_on_the_first_request(monkeypatch):
 def test_an_out_of_range_value_is_rejected(monkeypatch):
     monkeypatch.setenv("TTS_MAX_QUEUE", "0")
     with pytest.raises(ValueError, match="TTS_MAX_QUEUE"):
+        Settings.from_env()
+
+
+def test_a_negative_synthesis_cache_size_fails_at_startup(monkeypatch):
+    monkeypatch.setenv("TTS_SYNTHESIS_CACHE_SIZE", "-1")
+    with pytest.raises(ValueError, match="TTS_SYNTHESIS_CACHE_SIZE"):
         Settings.from_env()

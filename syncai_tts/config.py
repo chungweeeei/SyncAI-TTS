@@ -80,6 +80,7 @@ class Settings:
     intra_op_threads: int
     preload: bool
     default_voice: str
+    synthesis_cache_size: int
 
     speaker_pcm_link: str
     fallback_device: str
@@ -105,6 +106,7 @@ class Settings:
             intra_op_threads=_env_int("TTS_INTRA_OP_THREADS", 4),
             preload=_env_bool("TTS_PRELOAD", True),
             default_voice=_env_str("TTS_DEFAULT_VOICE", "af_heart"),
+            synthesis_cache_size=_env_int("TTS_SYNTHESIS_CACHE_SIZE", 32),
             speaker_pcm_link=_env_str("TTS_SPEAKER_PCM_LINK", "/dev/syncai/speaker_pcm"),
             fallback_device=_env_str("TTS_FALLBACK_DEVICE", "plughw:CARD=CD002AUDIO,DEV=0"),
             max_queue=_env_int("TTS_MAX_QUEUE", 8),
@@ -121,6 +123,8 @@ class Settings:
             raise ValueError(f"TTS_PORT out of range: {self.port}")
         if self.intra_op_threads < 1:
             raise ValueError(f"TTS_INTRA_OP_THREADS must be >= 1: {self.intra_op_threads}")
+        if self.synthesis_cache_size < 0:
+            raise ValueError(f"TTS_SYNTHESIS_CACHE_SIZE must be >= 0: {self.synthesis_cache_size}")
         if self.max_queue < 1:
             raise ValueError(f"TTS_MAX_QUEUE must be >= 1: {self.max_queue}")
         if self.job_history < 1:

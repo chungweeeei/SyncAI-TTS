@@ -220,6 +220,7 @@ def test_health_is_ok_when_the_model_is_loaded_and_the_thread_is_alive(client):
     assert body["model_error"] is None
     assert body["speaker"]["state"] == "idle"
     assert body["speaker"]["thread_alive"] is True
+    assert body["synthesis_cache"] == {"size": 0, "max": 4}
     assert body["version"]
 
 

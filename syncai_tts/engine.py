@@ -18,9 +18,10 @@ else's utterance.
 import os
 import threading
 import wave
+from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import structlog
@@ -70,6 +71,11 @@ class KokoroEngine:
         # Read without the lock by /health, so state and error are only ever
         # assigned as whole strings under it — never mutated in place.
         self._state_lock = threading.Lock()
+
+        # LRU of rendered audio by (text, voice, speed). Own lock, so /health
+        # never waits on create().
+        self._cache: "OrderedDict[Tuple[str, str, float], Utterance]" = OrderedDict()
+        self._cache_lock = threading.Lock()
 
         self._logger.info(
             "[KokoroEngine] Using kokoro model",
@@ -181,14 +187,22 @@ class KokoroEngine:
         it is a 400 tagged :attr:`Failure.UNKNOWN_VOICE` rather than the 500 the
         rest get. The backend's REST layer and its SPEAK activity both key off
         that code — see :mod:`syncai_tts.errors`.
+
+        Repeats are served from the cache, after the voice check.
         """
         self.ensure_loaded()
+
+        key = (text, voice, float(speed))
 
         with self._lock:
             if voice not in self._kokoro.get_voices():
                 raise BadRequestError(
                     f"unknown voice: {voice!r}", code=Failure.UNKNOWN_VOICE
                 )
+
+            cached = self._cached(key)
+            if cached is not None:
+                return cached
 
             try:
                 samples, sample_rate = self._kokoro.create(text, voice=voice, speed=speed)
@@ -216,6 +230,32 @@ class KokoroEngine:
         # only ever "close enough for a timeout margin".
         duration_s = len(pcm) / float(sample_rate) if sample_rate else 0.0
 
-        return Utterance(
+        utterance = Utterance(
             wav=buffer.getvalue(), duration_s=duration_s, sample_rate=int(sample_rate)
         )
+        self._remember(key, utterance)
+        return utterance
+
+    # --- Cache ---------------------------------------------------------------
+
+    def _cached(self, key: Tuple[str, str, float]) -> Optional[Utterance]:
+        with self._cache_lock:
+            utterance = self._cache.get(key)
+            if utterance is not None:
+                self._cache.move_to_end(key)
+            return utterance
+
+    def _remember(self, key: Tuple[str, str, float], utterance: Utterance) -> None:
+        # Utterance is frozen, so jobs can share one.
+        limit = self._settings.synthesis_cache_size
+        if limit <= 0:
+            return
+        with self._cache_lock:
+            self._cache[key] = utterance
+            self._cache.move_to_end(key)
+            while len(self._cache) > limit:
+                self._cache.popitem(last=False)
+
+    def cache_size(self) -> int:
+        with self._cache_lock:
+            return len(self._cache)
